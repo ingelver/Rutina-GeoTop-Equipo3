@@ -1,5 +1,5 @@
 {
-  "Uuid": "a71b533b-7f07-48fd-8b54-f10c6b460996",
+  "Uuid": "70d936ff-40a3-430b-9d35-2f6dcaf69b17",
   "IsCustomNode": false,
   "Description": "script para colocar elementos en revit con coordenadas utm",
   "Name": "GeoTop-Grupo3",
@@ -8,27 +8,51 @@
   },
   "Inputs": [
     {
-      "Id": "1bdb780821b9442b946e02b4dee786cf",
+      "Id": "9053364d39604927b3a628937e3f5768",
       "Name": "03-Familia",
       "Type": "selection",
       "Type2": "dropdownSelection",
       "Value": "Punto Control Orden C:Punto Control Orden C",
       "Description": "Todos los tipos de familia disponibles en el documento",
       "SelectedIndex": 109
+    },
+    {
+      "Id": "b9203e522f2e4d7284247d6ed16aa62d",
+      "Name": "01-Levantamiento",
+      "Type": "string",
+      "Type2": "string",
+      "Value": "C:\\Users\\LENOVO\\Downloads\\Levantamiento Pozo Tierras.xlsx",
+      "Description": "Permite seleccionar un archivo del sistema y devuelve su ruta de archivo."
+    },
+    {
+      "Id": "d0a1f5df1c3a41f9860038c8b2361a41",
+      "Name": "02-Hoja",
+      "Type": "string",
+      "Type2": "string",
+      "Value": "",
+      "Description": "Crea una cadena."
     }
   ],
-  "Outputs": [],
+  "Outputs": [
+    {
+      "Id": "852fd27976dd4585a7bec8681504f7a4",
+      "Name": "Watch",
+      "Type": "unknown",
+      "InitialValue": "",
+      "Description": "Muestra la salida de un nodo."
+    }
+  ],
   "Nodes": [
     {
       "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
       "Code": "\"\"\"\r\nCOLOCACIÓN DE FAMILIAS DESDE EXCEL\r\nRevit 2025-2026\r\n\r\nGrupo 3:\r\nDilver Llajaruna Anticona.\r\nJimmy Loli Mendoza.\r\nIngelver Gonzales Escobar.\r\n\r\nESTRUCTURA DE EXCEL\r\nEste, Norte, Cota.\r\n\r\nPROBLEMA\r\nCuando estamos en la etapa de construcción muchas veces se tiene que colocar elementos o interferencias que no fueron considerados al momento del expediente y es cuando topografía realiza el levantamiento y es donde el área de diseño tiene que colocar eso en el modelo digital para tomar decisiones. Es por ella nace el pequeño script.\r\n01-Levantamiento; Selección de archivo Excel, levantamiento.\r\n02-Hoja; si tiene varias hojas se coloca el nombre si no se deja en blanco.\r\n03-Familia; Se escoge la familia existente o cargada en el modelo. \r\n\"\"\"\r\n\r\nimport clr\r\nimport math\r\nimport posixpath\r\nimport zipfile\r\nimport xml.etree.ElementTree as ET\r\n\r\nclr.AddReference(\"RevitAPI\")\r\nclr.AddReference(\"RevitAPIUI\")\r\nclr.AddReference(\"RevitServices\")\r\nclr.AddReference(\"RevitNodes\")\r\n\r\nimport Revit\r\nclr.ImportExtensions(Revit.Elements)\r\n\r\nfrom Autodesk.Revit.DB import (\r\n    XYZ,\r\n    UnitUtils,\r\n    UnitTypeId,\r\n    FamilySymbol,\r\n    FamilyPlacementType,\r\n    FamilyInstance,\r\n    FilteredElementCollector,\r\n    SubTransaction,\r\n    TransactionStatus,\r\n    LocationPoint\r\n)\r\n\r\nfrom Autodesk.Revit.DB.Structure import StructuralType\r\nfrom Autodesk.Revit.UI import TaskDialog\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\n\r\nNS = {\r\n    \"s\": \"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"\r\n}\r\n\r\n\r\ndef leer_excel(ruta, nombre_hoja):\r\n    with zipfile.ZipFile(ruta, \"r\") as archivo:\r\n        textos = []\r\n\r\n        if \"xl/sharedStrings.xml\" in archivo.namelist():\r\n            raiz = ET.fromstring(\r\n                archivo.read(\"xl/sharedStrings.xml\")\r\n            )\r\n            textos = [\r\n                \"\".join(\r\n                    nodo.text or \"\"\r\n                    for nodo in elemento.iterfind(\".//s:t\", NS)\r\n                )\r\n                for elemento in raiz\r\n            ]\r\n\r\n        libro = ET.fromstring(\r\n            archivo.read(\"xl/workbook.xml\")\r\n        )\r\n        hojas = libro.find(\"s:sheets\", NS)\r\n\r\n        if hojas is None or len(hojas) == 0:\r\n            raise ValueError(\"El Excel no contiene hojas.\")\r\n\r\n        hoja = (\r\n            next(\r\n                (\r\n                    h for h in hojas\r\n                    if h.attrib[\"name\"] == nombre_hoja\r\n                ),\r\n                None\r\n            )\r\n            if nombre_hoja else hojas[0]\r\n        )\r\n\r\n        if hoja is None:\r\n            raise ValueError(\r\n                \"Hoja inexistente: {}. Disponibles: {}\".format(\r\n                    nombre_hoja,\r\n                    \", \".join(h.attrib[\"name\"] for h in hojas)\r\n                )\r\n            )\r\n\r\n        identificador = hoja.attrib[\r\n            \"{http://schemas.openxmlformats.org/\"\r\n            \"officeDocument/2006/relationships}id\"\r\n        ]\r\n\r\n        relaciones = ET.fromstring(\r\n            archivo.read(\"xl/_rels/workbook.xml.rels\")\r\n        )\r\n\r\n        destino = next(\r\n            relacion.attrib[\"Target\"]\r\n            for relacion in relaciones\r\n            if relacion.attrib[\"Id\"] == identificador\r\n        )\r\n\r\n        destino = (\r\n            destino.lstrip(\"/\")\r\n            if destino.startswith(\"/\")\r\n            else posixpath.normpath(\"xl/\" + destino)\r\n        )\r\n\r\n        datos = ET.fromstring(archivo.read(destino))\r\n        filas = []\r\n\r\n        for fila in datos.findall(\".//s:sheetData/s:row\", NS):\r\n            celdas = {}\r\n\r\n            for celda in fila.findall(\"s:c\", NS):\r\n                referencia = celda.attrib[\"r\"]\r\n                columna = \"\".join(\r\n                    caracter for caracter in referencia\r\n                    if caracter.isalpha()\r\n                )\r\n\r\n                nodo_valor = celda.find(\"s:v\", NS)\r\n                valor = (\r\n                    nodo_valor.text or \"\"\r\n                    if nodo_valor is not None else \"\"\r\n                )\r\n                tipo = celda.attrib.get(\"t\", \"\")\r\n\r\n                if tipo == \"s\":\r\n                    valor = textos[int(valor)]\r\n\r\n                elif tipo == \"inlineStr\":\r\n                    valor = \"\".join(\r\n                        nodo.text or \"\"\r\n                        for nodo in celda.findall(\".//s:t\", NS)\r\n                    )\r\n\r\n                if (\r\n                    celda.find(\"s:f\", NS) is not None\r\n                    and valor == \"\"\r\n                ):\r\n                    raise ValueError(\r\n                        \"Formula sin resultado guardado en {}. \"\r\n                        \"Recalcule y guarde desde Excel.\".format(\r\n                            referencia\r\n                        )\r\n                    )\r\n\r\n                celdas[columna] = valor\r\n\r\n            if any(str(v).strip() for v in celdas.values()):\r\n                filas.append((int(fila.attrib[\"r\"]), celdas))\r\n\r\n        return hoja.attrib[\"name\"], filas\r\n\r\n\r\ndef numero(valor):\r\n    texto = (\r\n        str(valor).strip()\r\n        .replace(\"\\u00a0\", \"\")\r\n        .replace(\" \", \"\")\r\n    )\r\n\r\n    if not texto:\r\n        raise ValueError(\"Coordenada vacia.\")\r\n\r\n    if \",\" in texto and \".\" in texto:\r\n        raise ValueError(\r\n            \"Use celdas numericas o texto sin \"\r\n            \"separadores de miles: \" + texto\r\n        )\r\n\r\n    resultado = float(texto.replace(\",\", \".\"))\r\n\r\n    if not math.isfinite(resultado):\r\n        raise ValueError(\"Coordenada no finita.\")\r\n\r\n    return resultado\r\n\r\n\r\ndef a_internas(valor):\r\n    return UnitUtils.ConvertToInternalUnits(\r\n        float(valor), UnitTypeId.Meters\r\n    )\r\n\r\n\r\ndef a_metros(valor):\r\n    return UnitUtils.ConvertFromInternalUnits(\r\n        float(valor), UnitTypeId.Meters\r\n    )\r\n\r\n\r\ndef ejecutar():\r\n    if len(IN) < 4:\r\n        raise ValueError(\r\n            \"Configure cuatro entradas: IN[0] a IN[3].\"\r\n        )\r\n\r\n    if doc is None or doc.IsFamilyDocument:\r\n        raise ValueError(\r\n            \"Abra un proyecto Revit, no el editor de familias.\"\r\n        )\r\n\r\n    ruta = str(IN[0] or \"\").strip()\r\n    nombre_hoja = str(IN[1] or \"\").strip()\r\n    familia = UnwrapElement(IN[2])\r\n\r\n    if not isinstance(IN[3], bool):\r\n        raise ValueError(\"Conecte un nodo Boolean a IN[3].\")\r\n\r\n    colocar = IN[3]\r\n\r\n    if not ruta:\r\n        raise ValueError(\r\n            \"Seleccione el Excel mediante File Path.\"\r\n        )\r\n\r\n    if not ruta.lower().endswith(\".xlsx\"):\r\n        raise ValueError(\"El archivo debe ser .xlsx.\")\r\n\r\n    if not isinstance(familia, FamilySymbol):\r\n        raise ValueError(\r\n            \"Seleccione un tipo mediante Family Types.\"\r\n        )\r\n\r\n    if not familia.Document.Equals(doc):\r\n        raise ValueError(\r\n            \"La familia debe pertenecer al documento activo.\"\r\n        )\r\n\r\n    if (\r\n        familia.Family.FamilyPlacementType\r\n        != FamilyPlacementType.OneLevelBased\r\n    ):\r\n        raise ValueError(\r\n            \"Seleccione una familia por punto sin anfitrion \"\r\n            \"(OneLevelBased).\"\r\n        )\r\n\r\n    hoja, filas = leer_excel(ruta, nombre_hoja)\r\n\r\n    if not filas:\r\n        raise ValueError(\"La hoja esta vacia.\")\r\n\r\n    encabezados = {}\r\n\r\n    for columna, valor in filas[0][1].items():\r\n        titulo = str(valor).strip().upper()\r\n\r\n        if titulo in (\"ESTE\", \"NORTE\", \"COTA\", \"ID\"):\r\n            if titulo in encabezados:\r\n                raise ValueError(\r\n                    \"Encabezado repetido: \" + titulo\r\n                )\r\n            encabezados[titulo] = columna\r\n\r\n    if all(\r\n        titulo in encabezados\r\n        for titulo in (\"ESTE\", \"NORTE\", \"COTA\")\r\n    ):\r\n        datos = filas[1:]\r\n        formato = \"Con encabezados ESTE, NORTE, COTA\"\r\n\r\n    else:\r\n        try:\r\n            for columna in (\"A\", \"B\", \"C\"):\r\n                numero(filas[0][1].get(columna, \"\"))\r\n\r\n        except Exception:\r\n            raise ValueError(\r\n                \"Use encabezados ESTE, NORTE, COTA \"\r\n                \"o datos numericos sin encabezados \"\r\n                \"en A=Este, B=Norte, C=Cota.\"\r\n            )\r\n\r\n        encabezados = {\r\n            \"ESTE\": \"A\",\r\n            \"NORTE\": \"B\",\r\n            \"COTA\": \"C\"\r\n        }\r\n        datos = filas\r\n        formato = \"Sin encabezados: A=Este, B=Norte, C=Cota\"\r\n\r\n    # Transformacion de coordenadas compartidas a internas.\r\n    ubicacion = doc.ActiveProjectLocation\r\n\r\n    origen = ubicacion.GetProjectPosition(XYZ(0, 0, 0))\r\n    eje_x = ubicacion.GetProjectPosition(XYZ(1, 0, 0))\r\n    eje_y = ubicacion.GetProjectPosition(XYZ(0, 1, 0))\r\n    eje_z = ubicacion.GetProjectPosition(XYZ(0, 0, 1))\r\n\r\n    a = eje_x.EastWest - origen.EastWest\r\n    b = eje_y.EastWest - origen.EastWest\r\n    c = eje_x.NorthSouth - origen.NorthSouth\r\n    d = eje_y.NorthSouth - origen.NorthSouth\r\n\r\n    determinante = a * d - b * c\r\n    escala_z = eje_z.Elevation - origen.Elevation\r\n\r\n    if (\r\n        abs(determinante) < 1e-9\r\n        or abs(escala_z) < 1e-9\r\n    ):\r\n        raise ValueError(\r\n            \"No se pudo invertir la transformacion \"\r\n            \"de coordenadas compartidas.\"\r\n        )\r\n\r\n    puntos = []\r\n    errores = []\r\n\r\n    for fila, celdas in datos:\r\n        try:\r\n            coordenadas = [\r\n                numero(celdas.get(encabezados[titulo], \"\"))\r\n                for titulo in (\"ESTE\", \"NORTE\", \"COTA\")\r\n            ]\r\n\r\n            este, norte, cota = [\r\n                a_internas(valor)\r\n                for valor in coordenadas\r\n            ]\r\n\r\n            de = este - origen.EastWest\r\n            dn = norte - origen.NorthSouth\r\n\r\n            punto = XYZ(\r\n                (de * d - b * dn) / determinante,\r\n                (a * dn - de * c) / determinante,\r\n                (cota - origen.Elevation) / escala_z\r\n            )\r\n\r\n            if not XYZ.IsWithinLengthLimits(punto):\r\n                raise ValueError(\r\n                    \"Punto fuera de los limites internos de Revit. \"\r\n                    \"Revise el Excel y las coordenadas compartidas. \"\r\n                    \"XYZ interno en metros: \"\r\n                    \"{:.3f}, {:.3f}, {:.3f}\".format(\r\n                        a_metros(punto.X),\r\n                        a_metros(punto.Y),\r\n                        a_metros(punto.Z)\r\n                    )\r\n                )\r\n\r\n            identificador = (\r\n                celdas.get(encabezados[\"ID\"], \"\")\r\n                if \"ID\" in encabezados else \"\"\r\n            )\r\n\r\n            puntos.append((\r\n                fila, identificador, coordenadas, punto\r\n            ))\r\n\r\n        except Exception as error:\r\n            errores.append(\r\n                \"Fila {}: {}\".format(fila, error)\r\n            )\r\n\r\n    if errores:\r\n        return {\r\n            \"Estado\": \"Validacion fallida; sin cambios\",\r\n            \"Archivo\": ruta,\r\n            \"Hoja\": hoja,\r\n            \"Errores\": errores\r\n        }\r\n\r\n    if not puntos:\r\n        raise ValueError(\"No hay filas de coordenadas.\")\r\n\r\n    # Duplicados del mismo tipo dentro de 1 mm.\r\n    tolerancia = a_internas(0.001)\r\n\r\n    existentes = [\r\n        instancia.Location.Point\r\n        for instancia in (\r\n            FilteredElementCollector(doc).OfClass(FamilyInstance)\r\n        )\r\n        if (\r\n            instancia.GetTypeId().Equals(familia.Id)\r\n            and isinstance(instancia.Location, LocationPoint)\r\n        )\r\n    ]\r\n\r\n    pendientes = []\r\n    omitidos = []\r\n\r\n    for registro in puntos:\r\n        if any(\r\n            registro[3].DistanceTo(p) <= tolerancia\r\n            for p in existentes\r\n        ):\r\n            omitidos.append(registro[0])\r\n        else:\r\n            pendientes.append(registro)\r\n            existentes.append(registro[3])\r\n\r\n    informe = {\r\n        \"Archivo\": ruta,\r\n        \"Hoja\": hoja,\r\n        \"Formato\": formato,\r\n        \"Filas validas\": len(puntos),\r\n        \"Por colocar\": len(pendientes),\r\n        \"Filas omitidas por duplicado (1 mm)\": omitidos,\r\n        \"Vista previa [fila, ID, Este, Norte, Cota]\": [\r\n            [fila, identificador] + coordenadas\r\n            for fila, identificador, coordenadas, punto in puntos\r\n        ]\r\n    }\r\n\r\n    if not colocar:\r\n        informe[\"Estado\"] = (\r\n            \"Coordenadas validadas; active EJECUTAR para colocar\"\r\n        )\r\n        informe[\"Creadas\"] = 0\r\n        return informe\r\n\r\n    if not pendientes:\r\n        informe[\"Estado\"] = \"Sin puntos nuevos\"\r\n        informe[\"Creadas\"] = 0\r\n        return informe\r\n\r\n    gestor = TransactionManager.Instance\r\n    gestor.EnsureInTransaction(doc)\r\n\r\n    subtransaccion = SubTransaction(doc)\r\n    creadas = []\r\n    comprobaciones = []\r\n\r\n    try:\r\n        subtransaccion.Start()\r\n\r\n        if not familia.IsActive:\r\n            familia.Activate()\r\n            doc.Regenerate()\r\n\r\n        for fila, identificador, coordenadas, punto in pendientes:\r\n            instancia = doc.Create.NewFamilyInstance(\r\n                punto,\r\n                familia,\r\n                StructuralType.NonStructural\r\n            )\r\n\r\n            doc.Regenerate()\r\n\r\n            if not isinstance(\r\n                instancia.Location, LocationPoint\r\n            ):\r\n                raise ValueError(\r\n                    \"Instancia sin ubicacion por punto. \"\r\n                    \"Fila {}.\".format(fila)\r\n                )\r\n\r\n            posicion = ubicacion.GetProjectPosition(\r\n                instancia.Location.Point\r\n            )\r\n\r\n            reales = [\r\n                a_metros(valor)\r\n                for valor in (\r\n                    posicion.EastWest,\r\n                    posicion.NorthSouth,\r\n                    posicion.Elevation\r\n                )\r\n            ]\r\n\r\n            if any(\r\n                abs(real - solicitado) > 0.001\r\n                for real, solicitado in zip(reales, coordenadas)\r\n            ):\r\n                raise ValueError(\r\n                    \"Desviacion mayor a 1 mm. Fila {}. \"\r\n                    \"Se revierte el lote.\".format(fila)\r\n                )\r\n\r\n            creadas.append(instancia)\r\n            comprobaciones.append(\r\n                [fila, identificador] + reales\r\n            )\r\n\r\n        if (\r\n            subtransaccion.Commit()\r\n            != TransactionStatus.Committed\r\n        ):\r\n            raise ValueError(\r\n                \"Revit no confirmo la colocacion del lote.\"\r\n            )\r\n\r\n    except:\r\n        if (\r\n            subtransaccion.GetStatus()\r\n            == TransactionStatus.Started\r\n        ):\r\n            subtransaccion.RollBack()\r\n        raise\r\n\r\n    finally:\r\n        try:\r\n            subtransaccion.Dispose()\r\n        finally:\r\n            gestor.TransactionTaskDone()\r\n\r\n    informe.update({\r\n        \"Estado\": \"Colocacion completada correctamente\",\r\n        \"Creadas\": len(creadas),\r\n        \"Instancias\": [\r\n            instancia.ToDSType(True)\r\n            for instancia in creadas\r\n        ],\r\n        \"Coordenadas verificadas\": comprobaciones\r\n    })\r\n\r\n    return informe\r\n\r\n\r\n# Resultado para Watch y Dynamo Player.\r\ntry:\r\n    OUT = ejecutar()\r\n\r\nexcept Exception as error:\r\n    OUT = {\r\n        \"Estado\": \"Error durante el proceso\",\r\n        \"Detalle\": str(error)\r\n    }\r\n\r\n\r\n# Ventana final: utiliza el metodo que ya funciono en Revit.\r\n# No muestra avisos internos de formato.\r\ntry:\r\n    estado = str(OUT.get(\"Estado\", \"Resultado\"))\r\n    resumen = []\r\n\r\n    if \"Filas validas\" in OUT:\r\n        resumen.append(\r\n            \"Puntos validos: {}\\n\"\r\n            \"Familias creadas: {}\\n\"\r\n            \"Duplicados omitidos: {}\".format(\r\n                OUT[\"Filas validas\"],\r\n                OUT.get(\"Creadas\", 0),\r\n                len(\r\n                    OUT.get(\r\n                        \"Filas omitidas por duplicado (1 mm)\",\r\n                        []\r\n                    )\r\n                )\r\n            )\r\n        )\r\n\r\n        if \"VALIDADAS\" in estado.upper():\r\n            resumen.append(\r\n                \"No se realizaron cambios en el modelo.\\n\"\r\n                \"Puntos por colocar: {}\\n\"\r\n                \"Active EJECUTAR para colocar las familias.\".format(\r\n                    OUT.get(\"Por colocar\", 0)\r\n                )\r\n            )\r\n\r\n    if \"Detalle\" in OUT:\r\n        resumen.append(str(OUT[\"Detalle\"]))\r\n\r\n    if OUT.get(\"Errores\"):\r\n        resumen.append(\r\n            \"Errores detectados:\\n\" + \"\\n\".join(\r\n                str(error)\r\n                for error in OUT[\"Errores\"][:10]\r\n            )\r\n        )\r\n\r\n        if len(OUT[\"Errores\"]) > 10:\r\n            resumen.append(\r\n                \"Consulte OUT para ver todos los errores.\"\r\n            )\r\n\r\n    if \"Archivo\" in OUT:\r\n        nombre_archivo = (\r\n            str(OUT[\"Archivo\"])\r\n            .replace(\"\\\\\", \"/\")\r\n            .rsplit(\"/\", 1)[-1]\r\n        )\r\n        resumen.append(\"Archivo: \" + nombre_archivo)\r\n\r\n    if \"Hoja\" in OUT:\r\n        resumen.append(\"Hoja: \" + str(OUT[\"Hoja\"]))\r\n\r\n    resumen.append(\r\n        \"Grupo 3: Dilver Llajaruna, \"\r\n        \"Jimmy Loli, Ingelver Gonzales\"\r\n    )\r\n\r\n    mensaje = estado + \"\\n\\n\" + \"\\n\\n\".join(resumen)\r\n\r\n    TaskDialog.Show(\r\n        \"Puntos de control | Excel\",\r\n        mensaje\r\n    )\r\n\r\nexcept Exception as error_ventana:\r\n    OUT[\"Aviso ventana\"] = str(error_ventana)",
       "Engine": "CPython3",
       "VariableInputPorts": true,
-      "Id": "83fc11e85a53436292adf0019a03da2b",
+      "Id": "49fef08d023c4acab317daaab498ee46",
       "NodeType": "PythonScriptNode",
       "Inputs": [
         {
-          "Id": "79cf91fe449245129df5f86803caa236",
+          "Id": "8654b39cdb71457dba496de4c25c5a46",
           "Name": "IN[0]",
           "Description": "Input #0",
           "UsingDefaultValue": false,
@@ -37,7 +61,7 @@
           "KeepListStructure": false
         },
         {
-          "Id": "0d1a4afb5d7e4e6784a7429268d434a0",
+          "Id": "c860627acdeb4064b2dd276ffd651809",
           "Name": "IN[1]",
           "Description": "Input #1",
           "UsingDefaultValue": false,
@@ -46,7 +70,7 @@
           "KeepListStructure": false
         },
         {
-          "Id": "9935753661f441b3a2486a1ecc33ac4b",
+          "Id": "686f2f1c32b0426597aaf69dd0a31198",
           "Name": "IN[2]",
           "Description": "Input #2",
           "UsingDefaultValue": false,
@@ -55,7 +79,7 @@
           "KeepListStructure": false
         },
         {
-          "Id": "dc263859232245e9820c80cdaa6fe8a8",
+          "Id": "5655acce02eb4add8993d9bb82198f99",
           "Name": "IN[3]",
           "Description": "Input #3",
           "UsingDefaultValue": false,
@@ -66,7 +90,7 @@
       ],
       "Outputs": [
         {
-          "Id": "32dcbe81413246dfbedd4dbd43e3492a",
+          "Id": "9b61e3cc0cda4539ad9042dee98d00d0",
           "Name": "OUT",
           "Description": "Resultado de la secuencia de comandos de Python",
           "UsingDefaultValue": false,
@@ -82,12 +106,12 @@
       "ConcreteType": "DSRevitNodesUI.FamilyTypes, DSRevitNodesUI",
       "SelectedIndex": 109,
       "SelectedString": "Punto Control Orden C:Punto Control Orden C",
-      "Id": "1bdb780821b9442b946e02b4dee786cf",
+      "Id": "9053364d39604927b3a628937e3f5768",
       "NodeType": "ExtensionNode",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "7e4f2d2b1dd24e97b2e1767f1aa1eb7f",
+          "Id": "5b9290052b034829814141e5b7cb4705",
           "Name": "Family Type",
           "Description": "Family Type seleccionado",
           "UsingDefaultValue": false,
@@ -101,12 +125,12 @@
     },
     {
       "ConcreteType": "CoreNodeModels.Input.BoolSelector, CoreNodeModels",
-      "Id": "3dab48d9dd3f416fa5da9c0f47a13a44",
+      "Id": "9836f532d6ad4528b2098b3e08b17db2",
       "NodeType": "BooleanInputNode",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "2b58046049fc4a4fa18e0904268e6041",
+          "Id": "a3d230af27da46899f47c155e5a74752",
           "Name": "",
           "Description": "Boolean",
           "UsingDefaultValue": false,
@@ -121,12 +145,12 @@
     },
     {
       "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
-      "Id": "268e4511eb9d4670a17d94857483ff5d",
+      "Id": "b9203e522f2e4d7284247d6ed16aa62d",
       "NodeType": "ExtensionNode",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "140c833f466349e4a74b1be837073b0a",
+          "Id": "35ad7c65758843b3809a1f4bff2e31f9",
           "Name": "",
           "Description": "Ruta de archivo",
           "UsingDefaultValue": false,
@@ -142,12 +166,14 @@
     },
     {
       "ConcreteType": "CoreNodeModels.Input.StringInput, CoreNodeModels",
-      "Id": "0952e4e3c70c43329285fa73d93ae866",
+      "SerializedWidth": 0.0,
+      "SerializedHeight": 0.0,
+      "Id": "d0a1f5df1c3a41f9860038c8b2361a41",
       "NodeType": "StringInputNode",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "478e407b3941437a98d131747f701476",
+          "Id": "35ce5fe2e8134747b35ea4dba37cdbb2",
           "Name": "",
           "Description": "String",
           "UsingDefaultValue": false,
@@ -157,18 +183,18 @@
         }
       ],
       "Replication": "Disabled",
-      "Description": "Crea una cadena",
+      "Description": "Crea una cadena.",
       "InputValue": ""
     },
     {
       "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
       "WatchWidth": 824.8,
       "WatchHeight": 697.6,
-      "Id": "8e9fa71e2fd64921bf014e297e4c4fe7",
+      "Id": "852fd27976dd4585a7bec8681504f7a4",
       "NodeType": "ExtensionNode",
       "Inputs": [
         {
-          "Id": "2d63a88a5aa546e7948684c0e87d7145",
+          "Id": "05489ea5ee9f4219a1af9949bbab9d83",
           "Name": "",
           "Description": "Nodo desde el que se mostrará la salida",
           "UsingDefaultValue": false,
@@ -179,7 +205,7 @@
       ],
       "Outputs": [
         {
-          "Id": "7403929326ea427d89bd4c1d827b4339",
+          "Id": "fa0bbf6b20144d488a41794c781154ab",
           "Name": "",
           "Description": "Salida del nodo",
           "UsingDefaultValue": false,
@@ -189,38 +215,38 @@
         }
       ],
       "Replication": "Disabled",
-      "Description": "Visualice la salida del nodo."
+      "Description": "Muestra la salida de un nodo."
     }
   ],
   "Connectors": [
     {
-      "Start": "32dcbe81413246dfbedd4dbd43e3492a",
-      "End": "2d63a88a5aa546e7948684c0e87d7145",
-      "Id": "6163328a7e63407abceed51dd5c62af5",
+      "Start": "9b61e3cc0cda4539ad9042dee98d00d0",
+      "End": "05489ea5ee9f4219a1af9949bbab9d83",
+      "Id": "f61897b3bb614a47b1bfd753e9e3a0c6",
       "IsHidden": "False"
     },
     {
-      "Start": "7e4f2d2b1dd24e97b2e1767f1aa1eb7f",
-      "End": "9935753661f441b3a2486a1ecc33ac4b",
-      "Id": "9a90d8fb30bf4599978e3af2adab5b37",
+      "Start": "5b9290052b034829814141e5b7cb4705",
+      "End": "686f2f1c32b0426597aaf69dd0a31198",
+      "Id": "f1c6041d2781455f9787795066828ecf",
       "IsHidden": "False"
     },
     {
-      "Start": "2b58046049fc4a4fa18e0904268e6041",
-      "End": "dc263859232245e9820c80cdaa6fe8a8",
-      "Id": "f69611d08f2944f88a71dd87b9c322da",
+      "Start": "a3d230af27da46899f47c155e5a74752",
+      "End": "5655acce02eb4add8993d9bb82198f99",
+      "Id": "13fa00af2ab642d69e7a586253aeee14",
       "IsHidden": "False"
     },
     {
-      "Start": "140c833f466349e4a74b1be837073b0a",
-      "End": "79cf91fe449245129df5f86803caa236",
-      "Id": "8986a78ad82943518d96fd070603073f",
+      "Start": "35ad7c65758843b3809a1f4bff2e31f9",
+      "End": "8654b39cdb71457dba496de4c25c5a46",
+      "Id": "1d245955b6f24bdb8f60a30e471079f7",
       "IsHidden": "False"
     },
     {
-      "Start": "478e407b3941437a98d131747f701476",
-      "End": "0d1a4afb5d7e4e6784a7429268d434a0",
-      "Id": "02d1213dbb2841a889c9281c91886304",
+      "Start": "35ce5fe2e8134747b35ea4dba37cdbb2",
+      "End": "c860627acdeb4064b2dd276ffd651809",
+      "Id": "ef0e2a25da8c4d0d82a8e3d08e3788bf",
       "IsHidden": "False"
     }
   ],
@@ -256,7 +282,7 @@
       "ScaleFactor": 1.0,
       "HasRunWithoutCrash": true,
       "IsVisibleInDynamoLibrary": true,
-      "Version": "3.3.2.11986",
+      "Version": "3.7.0.11777",
       "RunType": "Manual",
       "RunPeriod": "1000"
     },
@@ -275,7 +301,7 @@
     "ConnectorPins": [],
     "NodeViews": [
       {
-        "Id": "83fc11e85a53436292adf0019a03da2b",
+        "Id": "49fef08d023c4acab317daaab498ee46",
         "Name": "Python Script",
         "IsSetAsInput": false,
         "IsSetAsOutput": false,
@@ -285,7 +311,7 @@
         "Y": 175.7127953581166
       },
       {
-        "Id": "1bdb780821b9442b946e02b4dee786cf",
+        "Id": "9053364d39604927b3a628937e3f5768",
         "Name": "03-Familia",
         "IsSetAsInput": true,
         "IsSetAsOutput": false,
@@ -295,7 +321,7 @@
         "Y": 619.1245747154661
       },
       {
-        "Id": "3dab48d9dd3f416fa5da9c0f47a13a44",
+        "Id": "9836f532d6ad4528b2098b3e08b17db2",
         "Name": "Verificaciones ",
         "IsSetAsInput": false,
         "IsSetAsOutput": false,
@@ -305,9 +331,9 @@
         "Y": 792.0930575719175
       },
       {
-        "Id": "268e4511eb9d4670a17d94857483ff5d",
+        "Id": "b9203e522f2e4d7284247d6ed16aa62d",
         "Name": "01-Levantamiento",
-        "IsSetAsInput": false,
+        "IsSetAsInput": true,
         "IsSetAsOutput": false,
         "Excluded": false,
         "ShowGeometry": true,
@@ -315,9 +341,9 @@
         "Y": 238.7930815561083
       },
       {
-        "Id": "0952e4e3c70c43329285fa73d93ae866",
+        "Id": "d0a1f5df1c3a41f9860038c8b2361a41",
         "Name": "02-Hoja",
-        "IsSetAsInput": false,
+        "IsSetAsInput": true,
         "IsSetAsOutput": false,
         "Excluded": false,
         "ShowGeometry": true,
@@ -325,10 +351,10 @@
         "Y": 417.01306325354716
       },
       {
-        "Id": "8e9fa71e2fd64921bf014e297e4c4fe7",
+        "Id": "852fd27976dd4585a7bec8681504f7a4",
         "Name": "Watch",
         "IsSetAsInput": false,
-        "IsSetAsOutput": false,
+        "IsSetAsOutput": true,
         "Excluded": false,
         "ShowGeometry": true,
         "X": 1191.3605117943173,
